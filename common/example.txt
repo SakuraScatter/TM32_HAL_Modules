@@ -1,0 +1,87 @@
+#include "cmdParser.h"
+#include "usart.h" // 串口驱动头文件（根据自己的项目调整）
+
+// 示例1：LED命令处理函数（解析 LED=0 / LED=1 格式）
+int cmd_led(int argc, char *argv[])
+{
+    // argv[0] = "LED", argv[1] = "0"/"1"
+    if (argc < 2) {
+        printf("Usage: LED=<0/1>\n");
+        return -1;
+    }
+
+    int led_state = atoi(argv[1]);
+    if (led_state != 0 && led_state != 1) {
+        printf("Error: LED state must be 0 or 1\n");
+        return -1;
+    }
+
+    printf("Set LED state to: %d\n", led_state);
+    // 此处添加控制LED的硬件代码
+    return 0;
+}
+
+// 示例2：SET_THR命令处理函数（解析 SET_THR=0.3 0.5 0.7 格式）
+int cmd_set_thr(int argc, char *argv[])
+{
+    // argv[0] = "SET_THR", argv[1] = "0.3", argv[2] = "0.5", argv[3] = "0.7"
+    if (argc < 4) {
+        printf("Usage: SET_THR=<thr1> <thr2> <thr3>\n");
+        return -1;
+    }
+
+    float thr1 = atof(argv[1]);
+    float thr2 = atof(argv[2]);
+    float thr3 = atof(argv[3]);
+
+    printf("Set thresholds: %.1f, %.1f, %.1f\n", thr1, thr2, thr3);
+    // 此处添加设置阈值的业务代码
+    return 0;
+}
+
+// 串口中断回调函数（HAL库示例）
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART1) {
+        static char rx_ch;
+        // 重新开启串口中断接收下一个字符
+        HAL_UART_Receive_IT(&huart1, (uint8_t *)&rx_ch, 1);
+        // 中断中仅传递字符，不处理指令
+        cmd_rx_char(rx_ch);
+    }
+}
+
+// 重定向printf到串口（嵌入式系统必须）
+int fputc(int ch, FILE *f)
+{
+    HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
+    return ch;
+}
+
+int main(void)
+{
+    // 1. 系统初始化
+    HAL_Init();
+    SystemClock_Config();
+    MX_USART1_UART_Init();
+
+    // 2. 初始化命令解析器
+    // 设置分隔符：支持等号、空格、制表符（也可自定义为 "=, " 支持等号、逗号、空格）
+    cmd_set_delimiters(" = \t");
+    // 注册自定义命令
+    cmd_register("LED", cmd_led);
+    cmd_register("SET_THR", cmd_set_thr);
+
+    // 3. 开启串口中断接收
+    char dummy;
+    HAL_UART_Receive_IT(&huart1, (uint8_t *)&dummy, 1);
+
+    // 4. 主循环
+    while (1) {
+        // 处理待执行的指令（核心！）
+        cmd_process_pending();
+
+        // 其他业务逻辑（如传感器读取、硬件控制等）
+        // ...
+    }
+}
